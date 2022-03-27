@@ -54,7 +54,7 @@ struct child_config {
 */
 int drop_capabilities() {
 	/*
-	*	Note: Possibly overprivileged capabilities not dropped, including
+	*	Many capabilities not dropped from containers, including
 	*	CAP_DAC_OVERRIDE, CAP_FOWNER, CAP_LEASE, CAP_LINUX_IMMUTABLE,
 	*	CAP_SYS_PACCT, CAP_IPC_OWNER, CAP_NET_ADMIN, CAP_NET_BIND_SERVICE,
 	*	CAP_NET_RAW, CAP_SYS_PTRACE, CAP_KILL, CAP_SETUID, CAPSETGID,
@@ -208,6 +208,21 @@ int mounts(struct child_config* conf) {
 *
 */
 int filter_syscalls() {
+	/*
+	*	Many syscalls not filtered from use in containers, including _sysctl,
+	*	alloc_hugepages, free_hugepages, bdflush, create_module, nfsservctl,
+	*	perfctr, get_kernel_syms, setup, clock_adjtime, clock_settime, adjtime,
+	*	pciconfig_read, pciconfig_write, quotactl, get_mempolicy, getpagesize,
+	*	pciconfig_iobase, ustat, sysfs, uselib, sync_file_range2, readdir,
+	*	kexec_file_load, kexec_load, nice, oldfstat, oldlstat, oldolduname, oldstat,
+	*	olduname, perfmonctl, ppc_rtas, spu_create, spu_run, subpage_prot,
+	*	utrap_install, kern_features, pivot_root, preadv2, and pwritev2 have been 
+	*	evaluated as not posing a significant security risk within this use case
+	*	given the targeted Linux version(s) & architecture as well as the container
+	*	capabilities set previously; however, dropcan is largely experimental and 
+	*	due to limited resources, it has not been extensively evaluated
+	*	for vulnerabilities and is provided AT YOUR OWN RISK.
+	*/
 	scmp_filter_ctx ctx = NULL;
 	fprintf(stderr, ">> filtering syscalls...");
 	if(!(ctx = seccomp_init(SCMP_ACT_ALLOW))
