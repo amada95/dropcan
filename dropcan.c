@@ -211,20 +211,43 @@ int filter_syscalls() {
 	scmp_filter_ctx ctx = NULL;
 	fprintf(stderr, ">> filtering syscalls...");
 	if(!(ctx = seccomp_init(SCMP_ACT_ALLOW))
-		|| seccomp_rule_add(ctx, SCMP_FAIL, SCMP_SYS(chmod), 1,
-							SCMP_A1(SCMP_CMP_MASKED_EQ, S_ISUID, S_ISUID))
-		|| seccomp_rule_add(ctx, SCMP_FAIL, SCMP_SYS(chmod), 1,
-							SCMP_A1(SCMP_CMP_MASKED_EQ, S_ISGID, S_ISGID))
-		|| seccomp_rule_add(ctx, SCMP_FAIL, SCMP_SYS(fchmod), 1,
-							SCMP_A1(SCMP_CMP_MASKED_EQ, S_ISUID, S_ISUID))
-		|| seccomp_rule_add(ctx, SCMP_FAIL, SCMP_SYS(fchmod), 1,
-							SCMP_A1(SCMP_CMP_MASKED_EQ, S_ISGID, S_ISGID))
-		|| seccomp_rule_add(ctx, SCMP_FAIL, SCMP_SYS(fchmodat), 1,
-							SCMP_A1(SCMP_CMP_MASKED_EQ, S_ISUID, S_ISUID))
-		|| seccomp_rule_add(ctx, SCMP_FAIL, SCMP_SYS(fchmodat), 1,
-							SCMP_A1(SCMP_CMP_MASKED_EQ, S_ISGID, S_ISGID))
-
-		
+		|| seccomp_rule_add(ctx, SCMP_FAIL, SCMP_SYS(chmod), 1,						// disable creation of new setuid/setgid executables
+					SCMP_A1(SCMP_CMP_MASKED_EQ, S_ISUID, S_ISUID))
+		|| seccomp_rule_add(ctx, SCMP_FAIL, SCMP_SYS(chmod), 1,						// disable creation of new setuid/setgid executables
+					SCMP_A1(SCMP_CMP_MASKED_EQ, S_ISGID, S_ISGID))
+		|| seccomp_rule_add(ctx, SCMP_FAIL, SCMP_SYS(fchmod), 1,					// disable creation of new setuid/setgid executables
+					SCMP_A1(SCMP_CMP_MASKED_EQ, S_ISUID, S_ISUID))
+		|| seccomp_rule_add(ctx, SCMP_FAIL, SCMP_SYS(fchmod), 1,					// disable creation of new setuid/setgid executables
+					SCMP_A1(SCMP_CMP_MASKED_EQ, S_ISGID, S_ISGID))
+		|| seccomp_rule_add(ctx, SCMP_FAIL, SCMP_SYS(fchmodat), 1,					// disable creation of new setuid/setgid executables
+					SCMP_A2(SCMP_CMP_MASKED_EQ, S_ISUID, S_ISUID))
+		|| seccomp_rule_add(ctx, SCMP_FAIL, SCMP_SYS(fchmodat), 1,					// disable creation of new setuid/setgid executables
+					SCMP_A2(SCMP_CMP_MASKED_EQ, S_ISGID, S_ISGID))
+		|| seccomp_rule_add(ctx, SCMP_FAIL, SCMP_SYS(unshare), 1,					// disable nested user namespaces
+					SCMP_A0(SCMP_CMP_MASKED_EQ, CLONE_NEWUSER, CLONE_NEWUSER))
+		|| seccomp_rule_add(ctx, SCMP_FAIL, SCMP_SYS(clone), 1,						// disable nested user namespaces
+					SCMP_A0(SCMP_CMP_MASKED_EQ, CLONE_NEWUSER, CLONE_NEWUSER))
+		|| seccomp_rule_add(ctx, SCMP_FAIL, SCMP_SYS(ioctl), 1,						// disable contained processes writing to the host terminal
+					SCMP_A1(SCMP_CMP_MASKED_EQ, TIOCSTI, TIOCSTI))
+		|| seccomp_rule_add(ctx, SCMP_FAIL, SCMP_SYS(keyctl), 0)					// disable access to kernel keyring system
+		|| seccomp_rule_add(ctx, SCMP_FAIL, SCMP_SYS(add_key), 0)					// disable access to kernel keyring system
+		|| seccomp_rule_add(ctx, SCMP_FAIL, SCMP_SYS(request_key), 0)				// disable access to kernel keyring system
+		|| seccomp_rule_add(ctx, SCMP_FAIL, SCMP_SYS(ptrace), 0)					// disable ptrace from breaking seccomp
+		|| seccomp_rule_add(ctx, SCMP_FAIL, SCMP_SYS(mbind), 0)						// disable access to assigning NUMA nodes
+		|| seccomp_rule_add(ctx, SCMP_FAIL, SCMP_SYS(migrate_pages), 0)				// disable access to assigning NUMA nodes
+		|| seccomp_rule_add(ctx, SCMP_FAIL, SCMP_SYS(move_pages), 0)				// disable access to assigning NUMA nodes
+		|| seccomp_rule_add(ctx, SCMP_FAIL, SCMP_SYS(set_mempolicy), 0)				// disable access to assigning NUMA nodes
+		|| seccomp_rule_add(ctx, SCMP_FAIL, SCMP_SYS(userfaultfd), 0)				// disable unprivileged handling of page faults
+		|| seccomp_rule_add(ctx, SCMP_FAIL, SCMP_SYS(perf_event_open), 0)			// disable discovery of kernel addresses and uninitialized memory
+		|| seccomp_rule_add(ctx, SCMP_FLTATR_CTL_NNP, 0)							// disable setuid and setcap binaries from being executed with their additional privileges
+		|| seccomp_load(ctx)) {
+			if(ctx) seccomp_release(ctx);
+			fprintf("failed to apply filters: %m\n");
+			return 1;
+		}
+		seccomp_release(ctx);
+		fprintf(stderr, "done.\n");
+		return 0;
 }
 
 /*******************/
