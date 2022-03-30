@@ -6,6 +6,7 @@
 */
 
 #define _GNU_SOURCE
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -91,7 +92,7 @@ int drop_capabilities() {
 	fprintf(stderr, "bounding...");
 	for (size_t i = 0; i < num_dropped; i++) {
 		if(prctl(PR_CAPBSET_DROP, dropped_caps[i], 0, 0, 0)) {
-			fprintf(stderr, "prctl capability dropping failed: %m\n");
+			fprintf(stderr, "prctl capability dropping failed\n");
 			return 1;
 		}
 	}
@@ -100,7 +101,7 @@ int drop_capabilities() {
 	if(!(caps = cap_get_proc())
 		|| cap_set_flag(caps, CAP_INHERITABLE, num_dropped, dropped_caps, CAP_CLEAR)
 		|| cap_set_proc(caps)) {
-			fprintf(stderr, "failed clearing inheritable capabilities: %m\n");
+			fprintf(stderr, "failed clearing inheritable capabilities\n");
 			if (caps) cap_free(caps);
 			return 1;
 	}
@@ -140,7 +141,7 @@ int mounts(struct child_config* conf) {
 	*/
 	fprintf(stderr, ">> remounting child namespace with MS_PRIVATE...");
 	if(mount(NULL, "/", NULL, MS_REC | MS_PRIVATE, NULL)) {
-		fprintf(stderr, "remount failed: %m\n");
+		fprintf(stderr, "remount failed\n");
 		return -1;
 	}
 	fprintf(stderr, "done.\n");
@@ -177,15 +178,15 @@ int mounts(struct child_config* conf) {
 
 	fprintf(stderr, ">> unmounting old root %s...", old_root);
 	if(chdir("/")) {
-		fprintf(stderr, "chdir failed: %m\n");
+		fprintf(stderr, "chdir failed\n");
 		return -1;
 	}
 	if(umount2(old_root, MNT_DETACH)) {
-		fprintf(stderr, "umount failed: %m\n");
+		fprintf(stderr, "umount failed\n");
 		return -1;
 	}
 	if(rmdir(old_root)) {
-		fprintf(stderr, "rmdir failed: %m\n");
+		fprintf(stderr, "rmdir failed\n");
 		return -1;
 	}
 	fprintf(stderr, "done.\n");
@@ -257,7 +258,7 @@ int filter_syscalls() {
 		|| seccomp_attr_set(ctx, SCMP_FLTATR_CTL_NNP, 0)							// disable setuid and setcap binaries from being executed with their additional privileges
 		|| seccomp_load(ctx)) {
 			if(ctx) seccomp_release(ctx);
-			fprintf(stderr, "failed to apply filters: %m\n");
+			fprintf(stderr, "failed to apply filters\n");
 			return 1;
 		}
 		seccomp_release(ctx);
@@ -355,7 +356,7 @@ int resources(struct child_config* conf) {
 				return -1;
 		}
 		if(mkdir(dir, S_IRUSR | S_IWUSR | S_IXUSR)) {
-			fprintf(stderr, "mkdir %s failed: %m\n", dir);
+			fprintf(stderr, "mkdir %s failed\n", dir);
 			return -1;
 		}
 		for (struct cgrp_setting **setting = (*cgrp)->settings; *setting; setting++) {
@@ -363,15 +364,15 @@ int resources(struct child_config* conf) {
 			int fd = 0;
 			if (snprintf(path, sizeof(path), "%s/%s", dir, 
 				(*setting)->name) == -1){
-				fprintf(stderr, "snprintf failed:%m\n");
+				fprintf(stderr, "snprintf failed\n");
 				return -1;	
 			}
 			if((fd = open(path, O_WRONLY)) == -1) {
-				fprintf(stderr, "opening %s failed: %m\n", path);
+				fprintf(stderr, "opening %s failed\n", path);
 				return -1;
 			}
 			if(write(fd, (*setting)->value, strlen((*setting)->value)) == -1) {
-				fprintf(stderr, "writing configuration to %s failed: %m\n", path);
+				fprintf(stderr, "writing configuration to %s failed\n", path);
 				close(fd);
 				return -1;
 			}
@@ -384,7 +385,7 @@ int resources(struct child_config* conf) {
 				.rlim_max = CHILD_MAX_FDCNT,
 				.rlim_cur = CHILD_MAX_FDCNT,
 			})){
-			fprintf(stderr, "failed: %m\n");
+			fprintf(stderr, "failed\n");
 			return 1;					
 	}
 	fprintf(stderr, "done.\n");
@@ -409,21 +410,21 @@ int free_resources(struct child_config* conf) {
 				(*cgrp)->control, conf->hostname) == -1
 			|| snprintf(task, sizeof(task), "/sys/fs/cgroup/%s/tasks",
 				(*cgrp)->control) == -1) {
-			fprintf(stderr, "snprintf failed: %m\n");
+			fprintf(stderr, "snprintf failed\n");
 			return -1;
 		}
 		if ((task_fd = open(task, O_WRONLY)) == -1) {
-			fprintf(stderr, "opening %s failed: %m\n", task);
+			fprintf(stderr, "opening %s failed\n", task);
 			return -1;
 		}
 		if (write(task_fd, "0", 2) == -1) {
-			fprintf(stderr, "writing to %s failed: %m", task);
+			fprintf(stderr, "writing to %s failed", task);
 			close(task_fd);
 			return -1;
 		}
 		close(task_fd);
 		if (rmdir(dir)) {
-			fprintf(stderr, "removing %s failed: %m", dir);
+			fprintf(stderr, "removing %s failed", dir);
 			return -1;
 		}
 	}
@@ -450,23 +451,23 @@ int handle_child_uid_map(pid_t child_pid, int sockfd) {
 	int uid_map = 0;
 	int has_userns = -1;
 	if (read(sockfd, &has_userns, sizeof(has_userns)) != sizeof(has_userns)) {
-		fprintf(stderr, "couldn't read from child!\n");
+		fprintf(stderr, "reading from child failed\n");
 		return -1;
 	}
 	if (has_userns) {
 		char path[PATH_MAX] = {0};
 		for (char** file = (char *[]) { "uid_map", "gid_map", 0 }; *file; file++) {
 			if ((long unsigned int) snprintf(path, sizeof(path), "/proc/%d/%s", child_pid, *file) > sizeof(path)) {
-				fprintf(stderr, "snprintf size exceeded: %m\n");
+				fprintf(stderr, "snprintf size exceeded\n");
 				return -1;
 			}
 			fprintf(stderr, "writing %s...", path);
 			if ((uid_map = open(path, O_WRONLY)) == -1) {
-				fprintf(stderr, "failed to open: %m\n");
+				fprintf(stderr, "failed to open\n");
 				return -1;
 			}
 			if(dprintf(uid_map, "0 %d %d\n", USERNS_OFFSET, USERNS_COUNT) == -1) {
-				fprintf(stderr, "dprintf failed: %m\n");
+				fprintf(stderr, "dprintf failed\n");
 				close(uid_map);
 				return -1;
 			}
@@ -474,7 +475,7 @@ int handle_child_uid_map(pid_t child_pid, int sockfd) {
 		}
 	}
 	if (write(sockfd, &(int) {0}, sizeof(int)) != sizeof(int)) {
-		fprintf(stderr, "couldn't write: %m\n");
+		fprintf(stderr, "couldn't write\n");
 		return -1;
 	}
 
@@ -493,12 +494,12 @@ int userns(struct child_config* conf) {
 	fprintf(stderr, ">> trying to namespace a user...");
 	int has_userns = !unshare(CLONE_NEWUSER);
 	if (write(conf->fd, &has_userns, sizeof(has_userns)) != sizeof(has_userns)) {
-		fprintf(stderr, "couldn't write: %m\n");
+		fprintf(stderr, "couldn't write\n");
 		return -1;
 	}
 	int result = 0;
 	if (read(conf->fd, &result, sizeof(result)) != sizeof(result)) {
-		fprintf(stderr, "couldn't read: %m\n");
+		fprintf(stderr, "couldn't read\n");
 		return -1;
 	}
 	if (result) return -1;
@@ -511,7 +512,7 @@ int userns(struct child_config* conf) {
 	if (setgroups(1, &(gid_t) {conf->uid}) ||
 		setresgid(conf->uid, conf->uid, conf->uid) ||
 		setresuid(conf->uid, conf->uid, conf->uid)) {
-			fprintf(stderr, "failed: %m\n");
+			fprintf(stderr, "failed\n");
 			return -1;		
 	}
 	fprintf(stderr, "done.\n");
@@ -536,11 +537,11 @@ int child(void* arg) {
 			return -1;
 	}
 	if (close(conf->fd)) {
-		fprintf(stderr, "closing child socket failed: %m\n");
+		fprintf(stderr, "closing child socket failed\n");
 		return -1;
 	}
 	if(execve(conf->argv[0], conf->argv, NULL)) {
-		fprintf(stderr, "execve executable load failed: %m\n");
+		fprintf(stderr, "execve executable load failed\n");
 		return -1;
 	}
 	return 0;
@@ -602,7 +603,7 @@ finish_options:
 	fprintf(stderr, ">> validating Linux version...");
 	struct utsname host = {0};
 	if (uname(&host)) {
-		fprintf(stderr, "validation failed: %m\n");
+		fprintf(stderr, "validation failed\n");
 		goto cleanup;
 	}
 	int ver_major = -1;
@@ -630,11 +631,11 @@ finish_options:
 
 	/*    namespaces    */
 	if (socketpair(AF_LOCAL, SOCK_SEQPACKET, 0, socks)) {
-		fprintf(stderr, "socket pairing failed: %m\n");
+		fprintf(stderr, "socket pairing failed\n");
 		goto error;
 	}
 	if (fcntl(socks[0], F_SETFD, FD_CLOEXEC)) {
-		fprintf(stderr, "file descriptor configuration failed: %m\n");
+		fprintf(stderr, "file descriptor configuration failed\n");
 		goto error;
 	}
 	conf.fd = socks[1];
@@ -655,7 +656,7 @@ finish_options:
 				| CLONE_NEWNET
 				| CLONE_NEWUTS;
 	if ((child_pid = clone(child, stack + STACK_SIZE, flags | SIGCHLD, &conf)) == -1) {
-		fprintf(stderr, ">> stack clone failed! %m\n");
+		fprintf(stderr, ">> stack clone failed!\n");
 		err = 1;
 		goto clear_resources;
 	}
