@@ -29,8 +29,8 @@
 #include <linux/capability.h>
 #include <linux/limits.h>
 
-#define KERNEL_VER_MAJOR	5
-#define KERNEL_VER_MINOR	16
+#define KERNEL_VER_MAJOR	4
+#define KERNEL_VER_MINOR	7
 
 struct child_config {
 	uid_t	uid;
@@ -257,7 +257,7 @@ int filter_syscalls() {
 		|| seccomp_rule_add(ctx, SCMP_FLTATR_CTL_NNP, 0)							// disable setuid and setcap binaries from being executed with their additional privileges
 		|| seccomp_load(ctx)) {
 			if(ctx) seccomp_release(ctx);
-			fprintf("failed to apply filters: %m\n");
+			fprintf(stderr, "failed to apply filters: %m\n");
 			return 1;
 		}
 		seccomp_release(ctx);
@@ -268,6 +268,168 @@ int filter_syscalls() {
 /*******************/
 /*    resources    */
 /*******************/
+#define CHILD_MAX_MEM		"1073741824"	// Limit container and its children to 1GB of RAM
+#define CHILD_MAX_SHARES	"256"			// Limit container and its children to 25% of system CPU time
+#define CHILD_MAX_PIDS		"64"			// Limit container and its children to 64 PIDs
+#define CHILD_MAX_WEIGHT	"10"			// Limit container and its childrens' process priority
+#define CHILD_MAX_FDCNT		64				// Limit container and its children to 64 file descriptors
+
+struct cgrp_control {
+	char control[256];
+	struct cgrp_setting {
+		char name[256];
+		char value[256];
+	} **settings;
+};
+
+struct cgrp_setting add_to_tasks = {
+	.name = "tasks",
+	.value = "0"
+};
+
+struct cgrp_control *cgrps[] = {	// Build cgroups configuration
+	& (struct cgrp_control) {
+		.control = "memory",
+		.settings = (struct cgrp_setting *[]) {
+			& (struct cgrp_setting) {
+				.name = "memory.limit_in_bytes",
+				.value = CHILD_MAX_MEM
+			},
+			& (struct cgrp_setting) {
+				.name = "memory.kmem.limit_in_bytes",
+				.value = CHILD_MAX_MEM
+			},
+			&add_to_tasks,
+			NULL
+		}
+	},
+	& (struct cgrp_control) {
+		.control = "cpu",
+		.settings = (struct cgrp_setting *[]) {
+			& (struct cgrp_setting) {
+				.name = "cpu.shares",
+				.value = CHILD_MAX_SHARES
+			},
+			&add_to_tasks,
+			NULL
+		}
+	},
+	& (struct cgrp_control) {
+		.control = "pids",
+		.settings = (struct cgrp_setting *[]) {
+			& (struct cgrp_setting) {
+				.name = "pids.max",
+				.value = CHILD_MAX_PIDS
+			},
+			&add_to_tasks,
+			NULL
+		}
+	},
+	& (struct cgrp_control) {
+		.control = "blkio",
+		.settings = (struct cgrp_setting *[]) {
+			& (struct cgrp_setting) {
+				.name = "blkio.weight",
+				.value = CHILD_MAX_PIDS
+			},
+			&add_to_tasks,
+			NULL
+		}
+	},
+	NULL
+};
+
+/*
+*	int resources(struct child_config* conf)
+*	
+*	Apply above cgroup resource configuration structureto a given child.
+*
+*/
+int resources(struct child_config* conf) {
+	fprintf(stderr, ">> setting up cgroups...");
+	for (struct cgrp_control **cgrp = cgrps; *cgrp; cgrp++) {
+		char dir[PATH_MAX] = {0};
+		fprintf(stderr, "%s...", (*cgrp)->control);
+		if (snprintf(dir, sizeof(dir), "/sys/fs/cgroup/%s/%s",
+			(*cgrp)->control, conf->hostname) == -1) {
+				return -1;
+		}
+		if(mkdir(dir, S_IRUSR | S_IWUSR | S_IXUSR)) {
+			fprintf(stderr, "mkdir %s failed: %m\n", dir);
+			return -1;
+		}
+		for (struct cgrp_setting **setting = (*cgrp)->settings; *setting; setting++) {
+			char path[PATH_MAX] = {0};
+			int fd = 0;
+			if (snprintf(path, sizeof(path), "%s/%s", dir, 
+				(*setting)->name) == -1){
+				fprintf(stderr, "snprintf failed:%m\n");
+				return -1;	
+			}
+			if((fd = open(path, O_WRONLY)) == -1) {
+				fprintf(stderr, "opening %s failed: %m\n", path);
+				return -1;
+			}
+			if(write(fd, (*setting)->value, strlen((*setting)->value)) == -1) {
+				fprintf(stderr, "writing configuration to %s failed: %m\n", path);
+				close(fd);
+				return -1;
+			}
+			close(fd);
+		}
+	}
+	fprintf(stderr, ">> setting rlimit...");
+	if (setrlimit(RLIMIT_NOFILE,
+			& (struct rlimit) {
+				.rlim_max = CHILD_MAX_FDCNT,
+				.rlim_cur = CHILD_MAX_FDCNT,
+			})){
+			fprintf(stderr, "failed: %m\n");
+			return 1;					
+	}
+	fprintf(stderr, "done.\n");
+	return 0;
+}
+
+/*
+*
+*	int free_resources(struct child_config* conf)
+*
+*	Clean up and free cgroup for a given child without requiring
+*	the alteration of system-wide values outside the container namespace.
+*
+*/
+int free_resources(struct child_config* conf) {
+	fprintf(stderr, ">> cleaning cgroups...");
+	for (struct cgrp_control **cgrp = cgrps; *cgrp; cgrp++) {
+		char dir[PATH_MAX] = {0};
+		char task[PATH_MAX] = {0};
+		int task_fd = 0;
+		if (snprintf(dir, sizeof(dir), "/sys/fs/cgroup/%s/%s",
+				(*cgrp)->control, conf->hostname) == -1
+			|| snprintf(task, sizeof(task), "/sys/fs/cgroup/%s/tasks",
+				(*cgrp)->control) == -1) {
+			fprintf(stderr, "snprintf failed: %m\n");
+			return -1;
+		}
+		if ((task_fd = open(task, O_WRONLY)) == -1) {
+			fprintf(stderr, "opening %s failed: %m\n", task);
+			return -1;
+		}
+		if (write(task_fd, "0", 2) == -1) {
+			fprintf(stderr, "writing to %s failed: %m", task);
+			close(task_fd);
+			return -1;
+		}
+		close(task_fd);
+		if (rmdir(dir)) {
+			fprintf(stderr, "removing %s failed: %m", dir);
+			return -1;
+		}
+	}
+	fprintf(stderr, "done.\n");
+	return 0;
+}
 
 /***********************/
 /*        child        */
@@ -284,7 +446,7 @@ int filter_syscalls() {
 *	process tree of the child exits.
 *
 */
-int handle_child_uid_map (pid_t child_pid, int sockfd) {
+int handle_child_uid_map(pid_t child_pid, int sockfd) {
 	int uid_map = 0;
 	int has_userns = -1;
 	if (read(sockfd, &has_userns, sizeof(has_userns)) != sizeof(has_userns)) {
@@ -369,7 +531,7 @@ int child(void* arg) {
 		|| mounts(conf)			// setup user mount namespace
 		|| userns(conf)			// setup user namespace
 		|| drop_capabilities()	// drop capabilities
-		|| syscalls()) {
+		|| filter_syscalls()) {	// filter syscalls
 			close(conf->fd);
 			return -1;
 	}
@@ -421,7 +583,7 @@ int main (int argc, char* argv[]) {
 				conf.mnt_dir = optarg;
 				break;
 			case 'u':
-				if(sscanf(optarg, "%d", &conf.uid) != 1){
+				if(sscanf(optarg, "%u", &conf.uid) != 1){
 					fprintf(stderr, "invalid uid: %s\n", optarg);
 					goto usage;
 				}
@@ -445,7 +607,7 @@ finish_options:
 	}
 	int ver_major = -1;
 	int ver_minor = -1;
-	if (sscanf(host.release, "%u.%u.", &ver_major, &ver_minor) != 2) {
+	if (sscanf(host.release, "%u.%u.", (unsigned int*) &ver_major, (unsigned int*) &ver_minor) != 2) {
 		fprintf(stderr, "invalid release format: %s\n", host.release);
 		goto cleanup;
 	}
@@ -482,7 +644,7 @@ finish_options:
 	if (!(stack = malloc(STACK_SIZE))) {
 		fprintf(stderr, ">> stack allocation failed\n");
 	}
-	if (resources(%conf)) {
+	if (resources(&conf)) {
 		err = 1;
 		goto clear_resources;
 	}
@@ -495,13 +657,29 @@ finish_options:
 	if ((child_pid = clone(child, stack + STACK_SIZE, flags | SIGCHLD, &conf)) == -1) {
 		fprintf(stderr, ">> stack clone failed! %m\n");
 		err = 1;
-		goto clear_resources
+		goto clear_resources;
 	}
 	close(socks[1]);
 	socks[1] = 0;
+	if(handle_child_uid_map(child_pid, socks[0])) {
+		err = 1;
+		goto kill_and_finish_child;
+	}
+	goto finish_child;
+	
+kill_and_finish_child:
+	if (child_pid) kill(child_pid, SIGKILL);
+	
+finish_child:;
+	int child_status = 0;
+	waitpid(child_pid, &child_status, 0);
+	err |= WEXITSTATUS(child_status);
+
+clear_resources:
+	free_resources(&conf);
+	free(stack);
 	
 	goto cleanup;
-	
 	/********************/
 
 usage:
