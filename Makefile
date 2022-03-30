@@ -3,7 +3,7 @@
 #
 
 CC		= gcc
-CFLAGS	= -Wall -Wextra -Wpedantic -Werror -std=c99 -O2
+CFLAGS	= -Wall -Wextra -Wpedantic -std=c99 -O2
 LFLAGS	= -lcap -lseccomp
 CSRC	= dropcan.c
 TARGET	= dropcan.bin

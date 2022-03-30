@@ -254,7 +254,7 @@ int filter_syscalls() {
 		|| seccomp_rule_add(ctx, SCMP_FAIL, SCMP_SYS(set_mempolicy), 0)				// disable access to assigning NUMA nodes
 		|| seccomp_rule_add(ctx, SCMP_FAIL, SCMP_SYS(userfaultfd), 0)				// disable unprivileged handling of page faults
 		|| seccomp_rule_add(ctx, SCMP_FAIL, SCMP_SYS(perf_event_open), 0)			// disable discovery of kernel addresses and uninitialized memory
-		|| seccomp_rule_add(ctx, SCMP_FLTATR_CTL_NNP, 0)							// disable setuid and setcap binaries from being executed with their additional privileges
+		|| seccomp_attr_set(ctx, SCMP_FLTATR_CTL_NNP, 0)							// disable setuid and setcap binaries from being executed with their additional privileges
 		|| seccomp_load(ctx)) {
 			if(ctx) seccomp_release(ctx);
 			fprintf(stderr, "failed to apply filters: %m\n");
